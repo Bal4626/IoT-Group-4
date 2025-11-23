@@ -183,7 +183,7 @@ void publishToBackend() {
   }
 
   String json = "{";
-  json += "\"anchor_id\":\"ANCHOR1\",";
+  json += "\"anchor_id\":\"WB1\",";   // change this to whatever like ANCHOR1 or WB
   json += "\"timestamp\":" + String(millis()) + ",";
   json += "\"peers\":[";
   for (int i = 0; i < peerCount; i++) {
