@@ -4,3 +4,4 @@ timestamp,wristband_id,anchor_id,confidence,anchor_x,anchor_y,anchor_z,distance
 timestamp,wristband_id,anchor_id,confidence,anchor_x,anchor_y,anchor_z,distance
 timestamp,wristband_id,anchor_id,confidence,anchor_x,anchor_y,anchor_z,distance
 timestamp,wristband_id,anchor_id,confidence,anchor_x,anchor_y,anchor_z,distance
+timestamp,wristband_id,anchor_id,confidence,anchor_x,anchor_y,anchor_z,distance

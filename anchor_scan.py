@@ -73,7 +73,7 @@ async def main():
         # --- AWS IoT MQTT SETUP ---
         ENDPOINT = "a16ii7k74cp6ku-ats.iot.ap-southeast-1.amazonaws.com"   # example: a123456789-ats.iot.ap-southeast-1.amazonaws.com
         CLIENT_ID = "anchor_rpi_1"
-        TOPIC = "iot/anchors/data"
+        TOPIC = "mall/wristbands/1/scans"
 
         mqtt_connection = mqtt_connection_builder.mtls_from_path(
             endpoint=ENDPOINT,
