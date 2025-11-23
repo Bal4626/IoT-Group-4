@@ -1,21 +1,18 @@
 #include <WiFi.h>
-#include <esp_eap_client.h>    // PEAP/WPA2-Enterprise API
-
 #include <WiFiClientSecure.h>
 #include <PubSubClient.h>
 #include <BLEDevice.h>
 #include <BLEScan.h>
 
-// ===== SUTD WPA2-Enterprise (PEAP) WiFi credentials =====
-const char* ssid      = "SUTD_Wifi";
-const char* identity  = "1006908";    // Outer identity
-const char* username  = "1006908";    // Inner username
-const char* password  = "*";          // Your SUTD WiFi password
+// -------- Phone Hotspot WiFi (WPA2-Personal) --------
+const char* WIFI_SSID     = "AndroidAP";   // <-- change to your hotspot SSID
+const char* WIFI_PASSWORD = "hvuv5858";    // <-- change to your hotspot password
 
 // -------- AWS IoT config --------
 const char* MQTT_ENDPOINT = "a16ii7k74cp6ku-ats.iot.ap-southeast-1.amazonaws.com";
 const int   MQTT_PORT     = 8883;
 const char* MQTT_TOPIC    = "mall/anchor/scans";
+
 
 
 // Put your AmazonRootCA1.pem here
@@ -101,10 +98,11 @@ db1WOpY9XMCWXuS4kyKqL+w0BX8rV3KIdkpgO6I1ZVDGVUPaL9oWGq3oMTF+tqkJ
 WiFiClientSecure secureClient;
 PubSubClient mqttClient(secureClient);
 
+// -------- BLE scanner --------
 BLEScan* scanner;
 
-unsigned long lastScan    = 0;
-unsigned long SCAN_INTERVAL = 5000; // every 5 seconds
+unsigned long lastScan      = 0;
+unsigned long SCAN_INTERVAL = 5000; // ms
 
 struct Peer {
   String id;
@@ -114,41 +112,33 @@ struct Peer {
 Peer peers[20];
 int peerCount = 0;
 
-// ===== WiFi PEAP connect (your working logic) =====
-void connectWiFi_PEAP() {
-  WiFi.disconnect(true);
+// ===== WiFi connect (HOTSPOT) =====
+void connectWiFi() {
   WiFi.mode(WIFI_STA);
+  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
 
-  // Configure EAP/PEAP credentials
-  esp_eap_client_set_identity((const unsigned char*)identity, strlen(identity));
-  esp_eap_client_set_username((const unsigned char*)username, strlen(username));
-  esp_eap_client_set_password((const unsigned char*)password, strlen(password));
+  Serial.print("Connecting to WiFi ");
+  Serial.print(WIFI_SSID);
 
-  esp_err_t err = esp_wifi_sta_enterprise_enable();
-  if (err != ESP_OK) {
-    Serial.printf("esp_wifi_sta_enterprise_enable() failed: %d\n", err);
-  }
-
-  WiFi.begin(ssid);
-
-  // Wait connecting
-  Serial.print("Connecting to SUTD_Wifi (PEAP)");
-  unsigned long start = millis();
-  while (WiFi.status() != WL_CONNECTED && millis() - start < 30000) {
-    Serial.print(".");
+  int retries = 0;
+  while (WiFi.status() != WL_CONNECTED && retries < 40) { // ~20s
     delay(500);
+    Serial.print(".");
+    retries++;
   }
+  Serial.println();
 
-  if (WiFi.status() == WL_CONNECTED) {
-    Serial.println("\nWiFi connected!");
-    Serial.print("IP address: ");
+  int st = WiFi.status();
+  Serial.print("WiFi status after connect: ");
+  Serial.println(st);
+
+  if (st == WL_CONNECTED) {
+    Serial.println("WiFi connected!");
+    Serial.print("IP: ");
     Serial.println(WiFi.localIP());
   } else {
-    Serial.println("\nWiFi connection failed.");
-    // Stop here so you SEE the problem
-    while (true) {
-      delay(1000);
-    }
+    Serial.println("WiFi FAILED to connect.");
+    while (true) { delay(1000); }
   }
 }
 
@@ -163,30 +153,29 @@ void connectMQTT() {
 
   Serial.println("Connecting to AWS IoT MQTT...");
   while (!mqttClient.connected()) {
-    if (mqttClient.connect("ANCHOR1")) {
+    if (mqttClient.connect("ESP32_ANCHOR1")) {
       Serial.println("MQTT connected!");
     } else {
-      Serial.print("MQTT connection failed, state=");
+      Serial.print("MQTT connect failed, state=");
       Serial.println(mqttClient.state());
       delay(5000);
     }
   }
 }
 
-// ===== BLE callback (scan for WB*) =====
+// ===== BLE callback: collect WB* peers =====
 class ScanCallbacks : public BLEAdvertisedDeviceCallbacks {
   void onResult(BLEAdvertisedDevice device) {
     String name = device.getName().c_str();
-
     if (name.startsWith("WB")) {  // wristbands only
       if (peerCount < 20) {
-        peers[peerCount++] = {name, device.getRSSI()};
+        peers[peerCount++] = { name, device.getRSSI() };
       }
     }
   }
 };
 
-// ===== Publish JSON to AWS IoT =====
+// ===== Publish BLE peers to AWS IoT =====
 void publishToBackend() {
   if (peerCount == 0) {
     Serial.println("No peers found this cycle.");
@@ -195,9 +184,8 @@ void publishToBackend() {
 
   String json = "{";
   json += "\"anchor_id\":\"ANCHOR1\",";
-  json += "\"timestamp\":\"" + String(millis()) + "\",";
+  json += "\"timestamp\":" + String(millis()) + ",";
   json += "\"peers\":[";
-
   for (int i = 0; i < peerCount; i++) {
     json += "{";
     json += "\"id\":\"" + peers[i].id + "\",";
@@ -205,7 +193,6 @@ void publishToBackend() {
     json += "}";
     if (i < peerCount - 1) json += ",";
   }
-
   json += "]}";
 
   if (mqttClient.connected()) {
@@ -223,13 +210,12 @@ void setup() {
 
   // BLE init
   BLEDevice::init("");
-
   scanner = BLEDevice::getScan();
   scanner->setAdvertisedDeviceCallbacks(new ScanCallbacks());
   scanner->setActiveScan(true);
 
-  // 1) Connect to SUTD_Wifi using PEAP
-  connectWiFi_PEAP();
+  // 1) Connect to hotspot WiFi
+  connectWiFi();
 
   // 2) Connect to AWS IoT
   connectMQTT();
