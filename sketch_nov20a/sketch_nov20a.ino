@@ -3,6 +3,8 @@
 #include <PubSubClient.h>
 #include <BLEDevice.h>
 #include <BLEScan.h>
+#include <BLEServer.h>
+#include <BLEUtils.h>
 
 // -------- Phone Hotspot WiFi (WPA2-Personal) --------
 const char* WIFI_SSID     = "AndroidAP";   // <-- change to your hotspot SSID
@@ -13,7 +15,10 @@ const char* MQTT_ENDPOINT = "a16ii7k74cp6ku-ats.iot.ap-southeast-1.amazonaws.com
 const int   MQTT_PORT     = 8883;
 const char* MQTT_TOPIC    = "mall/anchor/scans";
 
-
+// -------- Wristband identity (CHANGE PER DEVICE) --------
+// For WB1 board:
+const char* ANCHOR_ID       = "WB1";        // e.g. "WB1", "WB2", "WB3"
+const char* MQTT_CLIENT_ID  = "ESP32_WB1";  // must be unique per device
 
 // Put your AmazonRootCA1.pem here
 const char AWS_CERT_CA[] PROGMEM = R"EOF(
@@ -80,7 +85,7 @@ l3sZYczl+BZKfnWDt8QlWNn/COD9lb3NP4W9imlfprCRzAg9rpUTfcRKTp8ZJPW+
 tMpKv8ECgYEA3ZVfWnJToI581BPX/VVVKKQfbB0gUQw/grp0wASH/fftn4DQ5m9F
 R8TAecfUW4W7gB/YbPtDVeEaxLo4SI4/qMS5FvTqssrGYhSlN0cmvstoVrmMPVhh
 D3IggdcwU7nbJYrnSoVJy+cKCWXMxrLav0C8nb6UIT4mUxuWSoE1YPcCgYEAzTY2
-jRNH9WjZ3BWyE3/hFJCiJY1cJmGkD4kMa6cwA6KlfOR2BTfv8b+2F7puhH5VP3Op
+jRNH9Wj3BWyE3/hFJCiJY1cJmGkD4kMa6cwA6KlfOR2BTfv8b+2F7puhH5VP3Op
 +D6OkHqCDxXBdGoV4AaYEOs2xyI2i20ABkfCqjDHL86ysjbiYVnL5SGm+OCiMQxP
 Kneq8GoJcjGIJtN7gbrzokTEfGyqnBVNtlOYD88CgYAkqtw9nl+iWRHlEmeSn3VZ
 JVehz2wSnWFBI9PAFr/eUhG7bFilWVJwnulu/Zdxkb7GY/6vgiDRbE++sEYyE4AL
@@ -94,11 +99,10 @@ db1WOpY9XMCWXuS4kyKqL+w0BX8rV3KIdkpgO6I1ZVDGVUPaL9oWGq3oMTF+tqkJ
 -----END RSA PRIVATE KEY-----
 )EOF";
 
-
 WiFiClientSecure secureClient;
 PubSubClient mqttClient(secureClient);
 
-// -------- BLE scanner --------
+// -------- BLE scanner + advertising --------
 BLEScan* scanner;
 
 unsigned long lastScan      = 0;
@@ -153,7 +157,7 @@ void connectMQTT() {
 
   Serial.println("Connecting to AWS IoT MQTT...");
   while (!mqttClient.connected()) {
-    if (mqttClient.connect("ESP32_ANCHOR1")) {
+    if (mqttClient.connect(MQTT_CLIENT_ID)) {
       Serial.println("MQTT connected!");
     } else {
       Serial.print("MQTT connect failed, state=");
@@ -163,29 +167,33 @@ void connectMQTT() {
   }
 }
 
-// ===== BLE callback: collect WB* peers =====
+// ===== BLE callback: collect WB* peers (except self) =====
 class ScanCallbacks : public BLEAdvertisedDeviceCallbacks {
-  void onResult(BLEAdvertisedDevice device) {
-    String name = device.getName().c_str();
-    if (name.startsWith("WB")) {  // wristbands only
-      if (peerCount < 20) {
-        peers[peerCount++] = { name, device.getRSSI() };
-      }
+  void onResult(BLEAdvertisedDevice device) override {
+    std::string devNameStd = device.getName();
+    if (devNameStd.empty()) return;
+
+    String name = String(devNameStd.c_str());
+
+    // Only consider WB* devices
+    if (!name.startsWith("WB")) return;
+
+    // Ignore self
+    if (name == ANCHOR_ID) return;
+
+    if (peerCount < 20) {
+      peers[peerCount++] = { name, device.getRSSI() };
     }
   }
 };
 
 // ===== Publish BLE peers to AWS IoT =====
 void publishToBackend() {
-  if (peerCount == 0) {
-    Serial.println("No peers found this cycle.");
-    return;
-  }
-
   String json = "{";
-  json += "\"anchor_id\":\"WB1\",";   // change this to whatever like ANCHOR1 or WB
+  json += "\"anchor_id\":\"" + String(ANCHOR_ID) + "\",";
   json += "\"timestamp\":" + String(millis()) + ",";
   json += "\"peers\":[";
+
   for (int i = 0; i < peerCount; i++) {
     json += "{";
     json += "\"id\":\"" + peers[i].id + "\",";
@@ -208,11 +216,23 @@ void setup() {
   Serial.begin(115200);
   delay(1000);
 
-  // BLE init
-  BLEDevice::init("");
+  // --- BLE init: advertise THIS wristband as ANCHOR_ID (e.g. "WB2") ---
+  BLEDevice::init(ANCHOR_ID);   // sets the advertised name
+
+  BLEServer* pServer = BLEDevice::createServer(); // not used further, but needed by some stacks
+  BLEAdvertising* pAdvertising = BLEDevice::getAdvertising();
+  // Optional UUID just so it's not empty
+  BLEUUID serviceUUID("12345678-1234-5678-1234-56789abcdef0");
+  pAdvertising->addServiceUUID(serviceUUID);
+  pAdvertising->setScanResponse(true);
+  pAdvertising->start();
+  Serial.print("Started advertising as ");
+  Serial.println(ANCHOR_ID);
+
+  // --- BLE scanner init ---
   scanner = BLEDevice::getScan();
   scanner->setAdvertisedDeviceCallbacks(new ScanCallbacks());
-  scanner->setActiveScan(true);
+  scanner->setActiveScan(true);  // active scan to grab names quickly
 
   // 1) Connect to hotspot WiFi
   connectWiFi();
@@ -229,7 +249,8 @@ void loop() {
     peerCount = 0;
     Serial.println("Starting BLE scan...");
     scanner->start(3);  // scan 3 seconds
-    Serial.println("Scan done, publishing...");
+    Serial.print("Scan done, found peers: ");
+    Serial.println(peerCount);
     publishToBackend();
     scanner->clearResults();
     lastScan = millis();
