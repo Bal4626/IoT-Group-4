@@ -93,7 +93,7 @@ function App() {
                 position: "fixed",
                 top: "20px",
                 right: "20px",
-                width: "300px",
+                width: "400px",
                 backgroundColor: "#fff4f4",
                 borderLeft: "5px solid #d32f2f",
                 padding: "15px",
@@ -101,10 +101,10 @@ function App() {
                 borderRadius: "4px",
                 zIndex: 1000
             }}>
-                <h3 style={{ margin: "0 0 5px 0", color: "#d32f2f", fontSize: "1.1rem" }}>
+                <h2 style={{ margin: "0 0 10px 0", color: "#d32f2f", fontSize: "2rem" }}>
                     ⚠️ High Crowd Warning
-                </h3>
-                <p style={{ margin: 0, fontSize: "0.9rem", color: "#333" }}>
+                </h2>
+                <p style={{ margin: 0, fontSize: "1.2rem", color: "#333" }}>
                     Attend to Venue NOW!
                 </p>
             </div>
@@ -137,11 +137,11 @@ function App() {
                         onBlur={(e) => {
                             // When user leaves the input, reset to minimum if empty
                             if (e.target.value === '') {
-                                setCrowdThreshold(1);
+                                setCrowdThreshold(1); //change to -1 to test warning message 
                             }
                         }}
                         style={{ width: "60px", height: "32px", fontSize: "1.1rem"}}
-                        min="1"
+
                     />
                 </div>
 
