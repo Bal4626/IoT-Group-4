@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 
 const API_URL = "https://j9ln1xklt3.execute-api.ap-southeast-1.amazonaws.com/wristbands";
+const RSSI_THRESHOLD = -40; // dBm
+const WARNING_COUNT = 3; // number of wristbands in close proximity (RSSI > threshold) to trigger warning
 
 // simple utility: scale node coords into SVG space
 function normalisePositions(nodes, width, height, padding = 40) {
@@ -29,13 +31,26 @@ function normalisePositions(nodes, width, height, padding = 40) {
         };
     }
     return out;
-}
+} 
 
 function App() {
     const [data, setData] = useState({ nodes: [], edges: [] });
     const [loading, setLoading] = useState(false);
     const [error, setError] = useState("");
     const [isAutoRefresh, setIsAutoRefresh] = useState(true);
+
+    // Load from localStorage, fallback to WARNING_COUNT if not found
+    const [crowdThreshold, setCrowdThreshold] = useState(() => {
+        const saved = localStorage.getItem('crowdThreshold');
+        return saved ? Number(saved) : WARNING_COUNT;
+    });
+
+    const strongProximity = data.edges.filter(e => e.rssi > RSSI_THRESHOLD).length; // count of strong RSSI edges
+    const showWarning =  strongProximity > crowdThreshold;
+    // console.log('Threshold updated to:', crowdThreshold);
+    useEffect(() => {
+        localStorage.setItem('crowdThreshold', crowdThreshold);
+    }, [crowdThreshold]);
 
     const fetchData = async () => {
         try {
@@ -74,6 +89,26 @@ function App() {
 
     return (
         <div style={{ fontFamily: "system-ui, sans-serif", padding: "1rem" }}>
+            {showWarning && (<div style={{
+                position: "fixed",
+                top: "20px",
+                right: "20px",
+                width: "300px",
+                backgroundColor: "#fff4f4",
+                borderLeft: "5px solid #d32f2f",
+                padding: "15px",
+                boxShadow: "0 4px 8px rgba(0,0,0,0.2)",
+                borderRadius: "4px",
+                zIndex: 1000
+            }}>
+                <h3 style={{ margin: "0 0 5px 0", color: "#d32f2f", fontSize: "1.1rem" }}>
+                    ⚠️ High Crowd Warning
+                </h3>
+                <p style={{ margin: 0, fontSize: "0.9rem", color: "#333" }}>
+                    Attend to Venue NOW!
+                </p>
+            </div>
+            )}
             <h1>Wristband Graph Viewer</h1>
             <p style={{ fontSize: "0.9rem", color: "#555" }}>
                 Fetching from: <code>{API_URL}</code>
@@ -83,9 +118,33 @@ function App() {
                 <button onClick={fetchData} disabled={loading}>
                     {loading ? "Refreshing..." : "Refresh Now"}
                 </button>
+
                 <button onClick={() => setIsAutoRefresh(!isAutoRefresh)}>
                     {isAutoRefresh ? "⏸ Pause Auto-refresh" : "▶ Resume Auto-refresh"}
                 </button>
+
+                {/*set threshold value on frontend*/}
+                <div style={{ display: "flex", alignItems: "center", marginLeft: "1rem", border: "1px solid #ccc", padding: "4px 8px", borderRadius: "4px" }}>
+                    <label style={{ fontSize: "0.9rem", marginRight: "0.5rem" }}>
+                        Threshold Count:
+                    </label>
+                    <input
+                        type="number"
+                        value={crowdThreshold}
+                        onChange={(e) => { const val = e.target.value; if (val === '' || val === ' '){setCrowdThreshold(''); } else {const num = Number(val); 
+                            if (num >= 1) { setCrowdThreshold(num); 
+                                /*console.log('Threshold updated to:', num);*/ }}}}
+                        onBlur={(e) => {
+                            // When user leaves the input, reset to minimum if empty
+                            if (e.target.value === '') {
+                                setCrowdThreshold(1);
+                            }
+                        }}
+                        style={{ width: "60px", height: "32px", fontSize: "1.1rem"}}
+                        min="1"
+                    />
+                </div>
+
                 <span style={{ fontSize: "0.9rem", color: "#666", marginLeft: "1rem" }}>
                     {isAutoRefresh ? "Auto-refreshing every 3 seconds" : "Manual refresh mode"}
                 </span>
@@ -169,5 +228,7 @@ function App() {
         </div>
     );
 }
+
+
 
 export default App;
