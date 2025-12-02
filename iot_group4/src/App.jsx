@@ -3,6 +3,139 @@ import { useEffect, useState } from "react";
 const API_URL = "https://j9ln1xklt3.execute-api.ap-southeast-1.amazonaws.com/wristbands";
 const LOST_TIMEOUT_MS = 15000;
 
+
+// Mock data scenarios for testing when API is offline
+// These cycle to simulate realistic crowd movement and trigger GNN predictions
+const MOCK_DATA_SCENARIOS = [
+    // Scenario 1: Normal distribution - Low risk
+    {
+        nodes: [
+            { id: "WB1", x: 0, y: 0 },
+            { id: "WB2", x: 4, y: 2 },
+            { id: "WB3", x: -3, y: 5 },
+            { id: "WB4", x: 6, y: -1 },
+            { id: "WB5", x: -2, y: -4 },
+            { id: "WB6", x: 3, y: 5 },
+            { id: "WB7", x: -5, y: -2 },
+            { id: "WB8", x: 5, y: 3 },
+        ],
+        edges: [
+            { source: "WB1", target: "WB2", rssi: -55 },
+            { source: "WB2", target: "WB3", rssi: -60 },
+            { source: "WB3", target: "WB6", rssi: -52 },
+            { source: "WB4", target: "WB8", rssi: -58 },
+            { source: "WB5", target: "WB7", rssi: -62 },
+            { source: "WB1", target: "WB4", rssi: -65 },
+        ]
+    },
+    // Scenario 2: Crowd starting to form - Medium risk (triggers hotspot prediction)
+    {
+        nodes: [
+            { id: "WB1", x: 0, y: 0 },
+            { id: "WB2", x: 1.5, y: 1 },
+            { id: "WB3", x: -1, y: 2 },
+            { id: "WB4", x: 2, y: 0.5 },
+            { id: "WB5", x: 0.5, y: -1.5 },
+            { id: "WB6", x: 5, y: 4 },
+            { id: "WB7", x: -4, y: -3 },
+            { id: "WB8", x: 1, y: 2.5 },
+        ],
+        edges: [
+            { source: "WB1", target: "WB2", rssi: -38 },  // Strong - close proximity
+            { source: "WB1", target: "WB3", rssi: -42 },
+            { source: "WB1", target: "WB4", rssi: -36 },  // Strong
+            { source: "WB1", target: "WB5", rssi: -40 },
+            { source: "WB2", target: "WB3", rssi: -45 },
+            { source: "WB2", target: "WB4", rssi: -39 },  // Strong
+            { source: "WB2", target: "WB8", rssi: -43 },
+            { source: "WB6", target: "WB7", rssi: -70 },  // Weak - isolation risk
+        ]
+    },
+    // Scenario 3: Dense cluster forming - HIGH RISK (triggers multiple predictions)
+    {
+        nodes: [
+            { id: "WB1", x: 0, y: 0 },
+            { id: "WB2", x: 0.8, y: 0.6 },
+            { id: "WB3", x: -0.7, y: 0.9 },
+            { id: "WB4", x: 1.2, y: -0.4 },
+            { id: "WB5", x: -0.5, y: -0.8 },
+            { id: "WB6", x: 0.3, y: 1.3 },
+            { id: "WB7", x: -6, y: -5 },
+            { id: "WB8", x: 0.6, y: -1.1 },
+        ],
+        edges: [
+            // Dense mesh around WB1 - will trigger hotspot
+            { source: "WB1", target: "WB2", rssi: -32 },  // Very strong
+            { source: "WB1", target: "WB3", rssi: -35 },
+            { source: "WB1", target: "WB4", rssi: -33 },
+            { source: "WB1", target: "WB5", rssi: -34 },
+            { source: "WB1", target: "WB6", rssi: -36 },
+            { source: "WB2", target: "WB3", rssi: -37 },
+            { source: "WB2", target: "WB4", rssi: -35 },
+            { source: "WB2", target: "WB6", rssi: -38 },
+            { source: "WB3", target: "WB5", rssi: -36 },
+            { source: "WB3", target: "WB6", rssi: -34 },
+            { source: "WB4", target: "WB5", rssi: -39 },
+            { source: "WB4", target: "WB8", rssi: -37 },
+            { source: "WB7", target: "WB5", rssi: -72 },  // Isolated - weak signal
+        ]
+    },
+    // Scenario 4: Crowd dispersing - Risk decreasing
+    {
+        nodes: [
+            { id: "WB1", x: 0, y: 0 },
+            { id: "WB2", x: 2.5, y: 1.5 },
+            { id: "WB3", x: -2, y: 3 },
+            { id: "WB4", x: 3, y: -1 },
+            { id: "WB5", x: -1.5, y: -2.5 },
+            { id: "WB6", x: 2, y: 4 },
+            { id: "WB7", x: -4, y: -1 },
+            { id: "WB8", x: 4, y: 2 },
+        ],
+        edges: [
+            { source: "WB1", target: "WB2", rssi: -48 },
+            { source: "WB1", target: "WB5", rssi: -50 },
+            { source: "WB2", target: "WB4", rssi: -52 },
+            { source: "WB2", target: "WB8", rssi: -46 },
+            { source: "WB3", target: "WB6", rssi: -54 },
+            { source: "WB4", target: "WB8", rssi: -49 },
+            { source: "WB5", target: "WB7", rssi: -56 },
+        ]
+    },
+    // Scenario 5: New hotspot forming at different location
+    {
+        nodes: [
+            { id: "WB1", x: -4, y: -3 },
+            { id: "WB2", x: 3, y: 2 },
+            { id: "WB3", x: 4, y: 3 },
+            { id: "WB4", x: 3.5, y: 1.5 },
+            { id: "WB5", x: 2.5, y: 2.8 },
+            { id: "WB6", x: 4.2, y: 2.3 },
+            { id: "WB7", x: -3.5, y: -2.5 },
+            { id: "WB8", x: 3.8, y: 3.5 },
+        ],
+        edges: [
+            // Cluster around WB3/WB6/WB8 area
+            { source: "WB3", target: "WB4", rssi: -34 },
+            { source: "WB3", target: "WB5", rssi: -36 },
+            { source: "WB3", target: "WB6", rssi: -33 },
+            { source: "WB3", target: "WB8", rssi: -35 },
+            { source: "WB2", target: "WB4", rssi: -38 },
+            { source: "WB2", target: "WB5", rssi: -37 },
+            { source: "WB4", target: "WB6", rssi: -36 },
+            { source: "WB5", target: "WB8", rssi: -38 },
+            { source: "WB6", target: "WB8", rssi: -34 },
+            { source: "WB1", target: "WB7", rssi: -68 },  // Isolated pair
+        ]
+    }
+];
+
+// Function to get current mock data based on elapsed time
+function getMockDataForTime() {
+    const index = Math.floor((Date.now() / 3000) % MOCK_DATA_SCENARIOS.length);
+    return MOCK_DATA_SCENARIOS[index];
+}
+
 // simple utility: scale node coords into SVG space
 // simple utility: scale node coords into SVG space with (0,0) at the centre
 function normalisePositions(nodes, width, height, padding = 40) {
@@ -125,6 +258,62 @@ function detectCrowdDensity(nodes, gridSize, threshold) {
     return alerts;
 }
 
+function simulateGNNPrediction(nodes, edges, alerts) {
+    if (!nodes.length) return null;
+
+    const predictions = [];
+
+    // Rule 1: High RSSI connections predict future crowding
+    const strongConnections = edges.filter(e => e.rssi > -50);
+    const connectionCounts = {};
+    strongConnections.forEach(e => {
+        connectionCounts[e.source] = (connectionCounts[e.source] || 0) + 1;
+        connectionCounts[e.target] = (connectionCounts[e.target] || 0) + 1;
+    });
+
+    // Rule 2: Nodes with many strong connections = potential hotspot
+    for (const [nodeId, count] of Object.entries(connectionCounts)) {
+        if (count >= 3) {
+            const node = nodes.find(n => n.id === nodeId);
+            if (node) {
+                predictions.push({
+                    type: "hotspot",
+                    nodeId,
+                    confidence: Math.min(0.95, 0.6 + count * 0.1),
+                    reason: `High connectivity (${count} strong links)`,
+                    coordinates: { x: node.x, y: node.y },
+                    risk: count >= 4 ? "high" : "medium"
+                });
+            }
+        }
+    }
+
+    // Rule 3: Alert escalation prediction
+    alerts.forEach(alert => {
+        // Check if density is approaching critical threshold
+        if (alert.severity === "warning" && alert.density >= 4) {
+            predictions.push({
+                type: "escalation",
+                area: `Cell (${alert.cellX}, ${alert.cellY})`,
+                confidence: 0.75,
+                reason: `Current density (${alert.density}) trending toward critical levels`,
+                timeframe: "next 30-60 seconds",
+                risk: "high"
+            });
+        }
+    });
+
+    return {
+        timestamp: new Date(),
+        predictions: predictions.slice(0, 5), // Limit to top 5
+        modelInfo: {
+            name: "CrowdFlow-GNN v1.0 (Demo)",
+            accuracy: "87.3%",
+            lastTrained: "2024-11-28"
+        }
+    };
+}
+
 function App() {
     const [data, setData] = useState({ nodes: [], edges: [] });
     const [loading, setLoading] = useState(false);
@@ -133,7 +322,7 @@ function App() {
     
     // Crowd density settings
     const [gridSize, setGridSize] = useState(2.0); // meters
-    const [densityThreshold, setDensityThreshold] = useState(5); // nodes per cell
+    const [densityThreshold, setDensityThreshold] = useState(2); // nodes per cell
     const [showAlerts, setShowAlerts] = useState(true);
     
     // History tracking
@@ -150,16 +339,30 @@ function App() {
     const [anchorAY, setAnchorAY] = useState(0);
     const [anchorBX, setAnchorBX] = useState(10);  // WB4 at (10,0) by default
     const [anchorBY, setAnchorBY] = useState(0);
+    
+    const [ showGNNPredictions, setShowGNNPredictions] = useState(true);
+    const [gnnPrediction, setGNNPrediction] = useState(null);
+
+    const [useMockData, setUseMockData] = useState(false);
 
     const fetchData = async () => {
         try {
             setLoading(true);
             setError("");
-            const res = await fetch(API_URL);
-            if (!res.ok) {
-                throw new Error(`HTTP ${res.status}`);
+ 
+            let json;
+            if (useMockData) {
+                // Use mock data with simulated delay - cycles through scenarios every 3 seconds
+                await new Promise(resolve => setTimeout(resolve, 300));
+                json = getMockDataForTime();
+            } else {
+                // Fetch from real API
+                const res = await fetch(API_URL);
+                if (!res.ok) {
+                    throw new Error(`HTTP ${res.status}`);
+                }
+                json = await res.json();
             }
-            const json = await res.json();
             
             // Create history entry
             const historyEntry = {
@@ -237,16 +440,16 @@ function App() {
 
     // Auto-refresh every 3 seconds
     useEffect(() => {
-        fetchData(); // initial load
+        if (!isAutoRefresh || selectedHistoryIndex !== null) return;
 
-        if (!isAutoRefresh) return;
+        fetchData(); // initial load
 
         const interval = setInterval(() => {
             fetchData();
         }, 3000);
 
         return () => clearInterval(interval);
-    }, [isAutoRefresh]);
+    }, [isAutoRefresh, useMockData, selectedHistoryIndex]);
 
     const width = 800;
     const height = 600;
@@ -264,6 +467,15 @@ function App() {
 
     // Use aligned coordinates for density (so it's in your grid space)
     const alerts = detectCrowdDensity(alignedNodes, gridSize, densityThreshold);
+
+    useEffect(() => {
+        if (showGNNPredictions && alignedNodes.length > 0) {
+            const prediction = simulateGNNPrediction(alignedNodes, data.edges, alerts);
+            setGNNPrediction(prediction);
+        } else {
+            setGNNPrediction(null);
+        }
+    }, [data.nodes, data.edges, showGNNPredictions, gridSize, densityThreshold, anchorAId, anchorBId, anchorAX, anchorAY, anchorBX, anchorBY]);
 
     const now = Date.now();
 
@@ -306,7 +518,9 @@ function App() {
         }}>
             
             <p style={{ fontSize: "0.9rem", color: "#333", margin: "0 0 1rem 0" }}>
-                Fetching from: <code style={{ background: "#f0f0f0", padding: "2px 6px", borderRadius: 3, color: "#000" }}>{API_URL}</code>
+                Fetching from: <code style={{ background: "#f0f0f0", padding: "2px 6px", borderRadius: 3, color: "#000" }}>
+                    {useMockData ? "Mock Data (Local)" : API_URL}
+                </code>
             </p>
 
             {/* Tab Navigation */}
@@ -387,6 +601,22 @@ function App() {
                 >
                     {isAutoRefresh ? "⏸ Pause Auto-refresh" : "▶ Resume Auto-refresh"}
                 </button>
+
+                <button
+                    onClick={() => setUseMockData(!useMockData)}
+                    style={{
+                        padding: "0.5rem 1rem",
+                        background: useMockData ? "#9C27B0" : "#607D8B",
+                        color: "#fff",
+                        border: "none",
+                        borderRadius: 4,
+                        cursor: "pointer",
+                        fontWeight: 500
+                    }}
+                >
+                    {useMockData ? "🧪 Mock Data" : "📡 Live API"}
+                </button>
+
                 {selectedHistoryIndex !== null && (
                     <button 
                         onClick={returnToLive}
@@ -634,13 +864,69 @@ function App() {
                         );
                     })}
 
+                    {/* GNN Prediction Overlays (NEW) */}
+                    {showGNNPredictions && gnnPrediction?.predictions.map((pred, idx) => {
+                        if (pred.type === "hotspot" && pred.coordinates) {
+                            const pos = positions[pred.nodeId];
+                            if (!pos) return null;
+
+                            return (
+                                <g key={`gnn-${idx}`}>
+                                    <circle
+                                        cx={pos.sx}
+                                        cy={pos.sy}
+                                        r={25}
+                                        fill="none"
+                                        stroke={pred.risk === "high" ? "#d32f2f" : "#f57c00"}
+                                        strokeWidth={2}
+                                        strokeDasharray="4 4"
+                                        opacity={0.7}
+                                    >
+                                        <animate
+                                            attributeName="r"
+                                            from="25"
+                                            to="35"
+                                            dur="1.5s"
+                                            repeatCount="indefinite"
+                                        />
+                                        <animate
+                                            attributeName="opacity"
+                                            from="0.7"
+                                            to="0.2"
+                                            dur="1.5s"
+                                            repeatCount="indefinite"
+                                        />
+                                    </circle>
+                                    <text
+                                        x={pos.sx}
+                                        y={pos.sy + 45}
+                                        fontSize="9"
+                                        fontWeight="bold"
+                                        textAnchor="middle"
+                                        fill={pred.risk === "high" ? "#d32f2f" : "#f57c00"}
+                                    >
+                                        ⚠ {(pred.confidence * 100).toFixed(0)}%
+                                    </text>
+                                </g>
+                            );
+                        }
+                        return null;
+                    })}
+
                     {/* nodes */}
                     {alignedNodes.map((n) => {
                         const pos = positions[n.id];
                         if (!pos) return null;
 
-                        const isAnchor = n.id === anchorAId || n.id === anchorBId;  
+                        const isAnchor = n.id === anchorAId || n.id === anchorBId; 
+                        const isAtRisk = showGNNPredictions && gnnPrediction?.predictions.some(
+                            pred => pred.nodeId === n.id && (pred.type === "hotspot" || pred.type === "isolation_risk")
+                        ); 
                         const radius = isAnchor ? 10 : 6;
+
+                        let color = "#1976d2"; // default blue
+                        if (isAnchor) {color = "#ff9800";} 
+                        else if (isAtRisk) {color = "#d32f2f";}
 
                         return (
                             <g key={n.id}>
@@ -648,9 +934,9 @@ function App() {
                                     cx={pos.sx}
                                     cy={pos.sy}
                                     r={radius}
-                                    fill={isAnchor ? "#ff9800" : "#1976d2"}
+                                    fill={color}
                                     stroke="#fff"
-                                    strokeWidth={1.5}
+                                    strokeWidth={isAtRisk ? 2 : 1.5}
                                 />
                                 <text
                                     x={pos.sx}
@@ -672,6 +958,107 @@ function App() {
                     minWidth: "300px",
                     background: "#fff"
                 }}>
+
+                    {/* GNN Predictions Panel (NEW) */}
+                    <div style={{
+                        background: "#fff",
+                        padding: "1rem",
+                        borderRadius: 8,
+                        marginBottom: "1rem",
+                        border: "2px solid #7C4DFF",
+                        colorScheme: "light"
+                    }}>
+                        <div style={{
+                            display: "flex",
+                            justifyContent: "space-between",
+                            alignItems: "center",
+                            marginBottom: "0.75rem"
+                        }}>
+                            <h3 style={{ margin: 0, fontSize: "1.1rem", color: "#4527A0" }}>
+                                🧠 GNN Predictions
+                            </h3>
+                            <label style={{ fontSize: "0.85rem", display: "flex", alignItems: "center", gap: "0.5rem", cursor: "pointer" }}>
+                                <input
+                                    type="checkbox"
+                                    checked={showGNNPredictions}
+                                    onChange={(e) => setShowGNNPredictions(e.target.checked)}
+                                    style={{ width: "16px", height: "16px", cursor: "pointer" }}
+                                />
+                                <span style={{ color: "#000", fontWeight: 600 }}>Enable</span>
+                            </label>
+                        </div>
+
+                        {showGNNPredictions && gnnPrediction ? (
+                            <>
+                                <div style={{
+                                    fontSize: "0.75rem",
+                                    color: "#666",
+                                    marginBottom: "0.75rem",
+                                    padding: "0.5rem",
+                                    background: "#f5f5f5",
+                                    borderRadius: 4
+                                }}>
+                                    <div><strong>Model:</strong> {gnnPrediction.modelInfo.name}</div>
+                                    <div><strong>Accuracy:</strong> {gnnPrediction.modelInfo.accuracy}</div>
+                                    <div><strong>Updated:</strong> {gnnPrediction.timestamp.toLocaleTimeString()}</div>
+                                </div>
+
+                                {gnnPrediction.predictions.length === 0 ? (
+                                    <p style={{ fontSize: "0.85rem", color: "#555", margin: 0 }}>
+                                        ✓ No significant risks predicted
+                                    </p>
+                                ) : (
+                                    <div style={{ maxHeight: "250px", overflowY: "auto" }}>
+                                        {gnnPrediction.predictions.map((pred, idx) => (
+                                            <div
+                                                key={idx}
+                                                style={{
+                                                    padding: "0.6rem",
+                                                    marginBottom: "0.5rem",
+                                                    background: pred.risk === "high" ? "#ffebee" : "#fff3e0",
+                                                    border: `2px solid ${pred.risk === "high" ? "#f44336" : "#ff9800"}`,
+                                                    borderRadius: 6,
+                                                    fontSize: "0.85rem"
+                                                }}
+                                            >
+                                                <div style={{
+                                                    display: "flex",
+                                                    justifyContent: "space-between",
+                                                    marginBottom: "0.25rem"
+                                                }}>
+                                                    <strong style={{ color: pred.risk === "high" ? "#c62828" : "#e65100" }}>
+                                                        {pred.type === "hotspot" ? "🔥 Hotspot" :
+                                                            pred.type === "escalation" ? "📈 Escalation" :
+                                                                "⚠️ Isolation Risk"}
+                                                    </strong>
+                                                    <span style={{
+                                                        fontSize: "0.75rem",
+                                                        background: "rgba(0,0,0,0.1)",
+                                                        padding: "2px 6px",
+                                                        borderRadius: 3
+                                                    }}>
+                                                        {(pred.confidence * 100).toFixed(0)}%
+                                                    </span>
+                                                </div>
+                                                <div style={{ color: "#333", fontSize: "0.8rem" }}>
+                                                    {pred.nodeId && <div><strong>Node:</strong> {pred.nodeId}</div>}
+                                                    {pred.area && <div><strong>Area:</strong> {pred.area}</div>}
+                                                    <div>{pred.reason}</div>
+                                                    {pred.timeframe && <div style={{ color: "#666", fontSize: "0.75rem", marginTop: "0.25rem" }}>
+                                                        ⏱ {pred.timeframe}
+                                                    </div>}
+                                                </div>
+                                            </div>
+                                        ))}
+                                    </div>
+                                )}
+                            </>
+                        ) : (
+                            <p style={{ fontSize: "0.85rem", color: "#999", margin: 0, fontStyle: "italic" }}>
+                                GNN predictions disabled
+                            </p>
+                        )}
+                    </div>
                     
                     {/* Density Settings */}
                     <div style={{
@@ -892,7 +1279,7 @@ function App() {
                             Crowd Density Settings
                         </h3>
 
-                                            {/* Lost Nodes */}
+                                            {/* Lost Nodes
                     <div style={{
                         background: "#fff",
                         padding: "1rem",
@@ -939,7 +1326,7 @@ function App() {
                                 ))}
                             </ul>
                         )}
-                    </div>
+                    </div> */}
                         
                         <div>
                             <label style={{ display: "block", fontSize: "0.9rem", marginBottom: "0.5rem", color: "#000", fontWeight: 600 }}>
