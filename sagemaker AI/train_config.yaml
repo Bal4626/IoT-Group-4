@@ -1,0 +1,40 @@
+---
+version: 1.0
+gsf:
+  basic:
+    model_encoder_type: rgat  # Changed to RGAT for edge attention
+    backend: gloo
+    verbose: true
+    num_layers: 2
+    hidden_size: 64
+    
+  gnn:
+    fanout: "10,10"
+    num_heads: 4  # Attention heads for RGAT
+    
+  input:
+    restore_model_path: null
+    
+  output:
+    save_model_path: ./models
+    save_embeds_path: ./embeds
+    save_prediction_path: ./predictions
+    
+  hyperparam:
+    dropout: 0.1
+    lr: 0.01
+    num_epochs: 50
+    batch_size: 128
+    wd_l2norm: 0.0001
+    eval_frequency: 10
+    
+  rgat:
+    num_heads: 4
+    use_self_loop: true
+    
+  node_classification:
+    task_type: node_classification
+    target_ntype: "_N"
+    label_field: "label"
+    multilabel: false
+    num_classes: 2
